@@ -1,0 +1,156 @@
+---
+title: 'DV3 homework #1'
+author: "Marton Nagy"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: journal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Using the `journal` R Markdown theme 😎
+
+Load the regions and zones collected by the [Spare Cores](https://sparecores.com/) project from the below URLs:
+
+  - https://keeper.sparecores.net/table/region
+  
+  - https://keeper.sparecores.net/table/region
+
+``` {r}
+library(jsonlite)
+library(data.table)
+regions <- data.table(fromJSON('https://keeper.sparecores.net/table/region'))
+zones <- data.table(fromJSON('https://keeper.sparecores.net/table/zone'))
+```
+
+The loaded data looks like:
+
+``` {r}
+str(regions)
+```
+
+``` {r}
+str(zones)
+```
+
+Let’s count the number of regions per country, shown in descending order:
+
+``` {r}
+regions[, .N, by = country_id][order(-N)]
+```
+
+A nicer table:
+
+``` {r}
+pander::pander(regions[, .N, by = country_id][order(-N)])
+```
+
+Let’s show the distribution of the founding year of the regions:
+
+``` {r}
+library(ggplot2)
+
+ggplot(regions[!is.na(founding_year), .N, by = founding_year], aes(x = founding_year, y = N)) +
+  geom_col() +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(min(regions$founding_year, na.rm = TRUE),
+                                  max(regions$founding_year, na.rm = TRUE), 1)) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_text(size = 8),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_line(linewidth = 0.75)) +
+  labs(title = 'Number of datacenters by founding year',
+       subtitle = 'Note that regions with unknown founding year were excluded from the plot.')
+```
+
+Also showing the average founding year on the same plot:
+
+``` {r}
+ggplot(regions[!is.na(founding_year), .N, by = founding_year], aes(x = founding_year, y = N)) +
+  geom_col() +
+  geom_vline(xintercept = mean(regions$founding_year, na.rm = TRUE), linewidth = 1.5, color = 'red') +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(min(regions$founding_year, na.rm = TRUE),
+                                  max(regions$founding_year, na.rm = TRUE), 1)) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_text(size = 8),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_line(linewidth = 0.75)) +
+  labs(title = 'Number of datacenters by founding year',
+       subtitle = 'Note that regions with unknown founding year were excluded from the plot.')
+```
+
+Now let’s filter for the regions in Europe!
+
+``` {r}
+library(countrycode)
+regions[, continent := countrycode(country_id, 'iso2c', 'continent')]
+eu_regions <- regions[continent == 'Europe']
+```
+
+After filtering, there should be `r regions[continent == 'Europe', .N]` regions left.
+
+Let’s count the number of zones per region, and merge it to the `regions` dataset.
+
+``` {r}
+eu_regions_zones = merge(eu_regions, zones[, .(zones = .N), by = region_id], all.x = TRUE)
+```
+
+There are `r eu_regions_zones[zones == 3, .N]` regions with 3 zones, and `r eu_regions_zones[zones == 1, .N]` regions with a single zone. Showing this visually for each vendor:
+
+``` {r}
+ggplot(eu_regions_zones, aes(x = vendor_id, fill = factor(zones))) +
+  geom_bar() +
+  theme_bw() +
+  labs(y = 'Number of regions') +
+  theme(axis.title.x = element_blank(),
+        legend.position = 'top') +
+  guides(fill=guide_legend(title='Number of availability zones in the region'))
+```
+
+Now let’s load a GeoJSON file on the boundaries of the European countries. You can use [leakyMirror/map-of-europe’s europe.geojson](https://raw.githubusercontent.com/leakyMirror/map-of-europe/refs/heads/master/GeoJSON/europe.geojson).
+
+``` {r}
+download.file('https://raw.githubusercontent.com/leakyMirror/map-of-europe/refs/heads/master/GeoJSON/europe.geojson', 'europe.geojson', mode = 'wb')
+library(sf)
+map <- st_read('europe.geojson')
+```
+
+Plotting the downloaded shapes:
+
+``` {r}
+ggplot() + geom_sf(data = map) + theme_void()
+```
+
+Now let’s get a background tile for this area!
+
+``` {r}
+library(maptiles)
+library(tidyterra)
+map_tiles <- get_tiles(map, apikey = 'c8880324-95c7-4b2c-be2f-c7faf72b49db', zoom = 4,
+                       provider = 'Stadia.StamenTerrainBackground', crop = TRUE)
+ggplot() +
+  geom_spatraster_rgb(data = map_tiles, , maxcell = 10e+05, interpolate = TRUE) +
+  theme_void()
+```
+
+Now let’s put together all the loaded layers (background raster map, polygon on country borders, and location of regions weighted by the number of zones, using color to represent if the region is powered by green energy, and use the `shape` to also visualize the vendor)!
+
+``` {r}
+ggplot() +
+  geom_spatraster_rgb(data = map_tiles, , maxcell = 10e+05, interpolate = TRUE) +
+  geom_sf(data = map, fill = NA, color = 'black') +
+  geom_point(data = eu_regions_zones, aes(x = lon, y = lat,
+                                          color = green_energy,
+                                          size = zones,
+                                          shape = vendor_id
+                                          ),
+             alpha = 0.6) +
+  scale_color_manual(values = c('TRUE' = 'darkgreen', 'FALSE' = 'brown')) +
+  theme_void()
+```
