@@ -1,0 +1,37 @@
+---
+output: html_document
+runtime: shiny
+---
+Static plot example:
+
+```{r}
+library(ggplot2)
+p <- ggplot(mtcars, aes(wt, qsec, color = factor(am))) + geom_point()
+p
+```
+
+Plotly:
+
+```{r}
+library(plotly)
+ggplotly(p)
+```
+
+GGirafe:
+```{r}
+library(ggiraph)
+library(ggthemr)
+
+ggthemr('pale', layout = 'scientific', spacing = 2, type = 'inner')
+p <- ggplot(mtcars, aes(wt, qsec, color = factor(am), tooltip = rownames(mtcars))) + geom_point_interactive()
+girafe(ggobj = p)
+```
+
+Interactive inputs:
+```{r}
+library(shiny)
+sliderInput('minhp', "Minimum horsepower", min = 0, max = max(mtcars$hp), value = 100)
+renderPlot({
+  ggplot(subset(mtcars, hp > input$minhp), aes(wt, qsec, color = factor(am))) + geom_point()
+  })
+```
